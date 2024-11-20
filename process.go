@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -109,13 +110,25 @@ func (proc *concurrentProcess) wait() {
 // newCommandRunner creates new external command runner for given executable. The executable path
 // is resolved in this function.
 func (proc *concurrentProcess) newCommandRunner(exe string, combineOutput bool) (*externalCommand, error) {
+	var args []string
 	p, err := execabs.LookPath(exe)
 	if err != nil {
-		return nil, err
+		parts := strings.Split(exe, " ")
+		if len(parts) > 1 {
+			// Try treating exe as a command with args
+			p, err = execabs.LookPath(parts[0])
+			if err != nil {
+				return nil, err
+			}
+			args = parts[1:]
+		} else {
+			return nil, err
+		}
 	}
 	cmd := &externalCommand{
 		proc:          proc,
 		exe:           p,
+		args:          args,
 		combineOutput: combineOutput,
 	}
 	return cmd, nil
@@ -129,6 +142,7 @@ type externalCommand struct {
 	proc          *concurrentProcess
 	eg            errgroup.Group
 	exe           string
+	args          []string
 	combineOutput bool
 }
 
@@ -136,6 +150,12 @@ type externalCommand struct {
 // process runs. First argument is stdout and the second argument is an error while running the
 // process.
 func (cmd *externalCommand) run(args []string, stdin string, callback func([]byte, error) error) {
+	if len(cmd.args) > 0 {
+		var allArgs []string
+		allArgs = append(allArgs, cmd.args...)
+		allArgs = append(allArgs, args...)
+		args = allArgs
+	}
 	exec := &cmdExecution{cmd.exe, args, stdin, cmd.combineOutput}
 	cmd.proc.run(&cmd.eg, exec, callback)
 }
